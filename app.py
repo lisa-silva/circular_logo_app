@@ -1,102 +1,222 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 import io
+import numpy as np
 
-def create_circular_logo_smart(image, output_size=500, fit_mode="fill", bg_color=(255, 255, 255, 0)):
-    """
-    fit_mode options:
-    - "fill": Fill entire circle (may crop edges)
-    - "fit": Fit inside circle (may have padding)
-    - "stretch": Stretch to fill (distorts aspect ratio)
-    """
-    if image.mode != 'RGBA':
-        image = image.convert('RGBA')
-    
-    # Create base image
-    base = Image.new('RGBA', (output_size, output_size), bg_color)
-    
-    # Create circular mask
-    mask = Image.new('L', (output_size, output_size), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.ellipse([(0, 0), (output_size, output_size)], fill=255)
-    
-    img_width, img_height = image.size
-    
-    if fit_mode == "fill":
-        # Crop to square then resize (fills circle, crops edges)
-        min_dim = min(img_width, img_height)
-        left = (img_width - min_dim) // 2
-        top = (img_height - min_dim) // 2
-        cropped = image.crop((left, top, left + min_dim, top + min_dim))
-        resized = cropped.resize((output_size, output_size), Image.Resampling.LANCZOS)
-        base.paste(resized, (0, 0), mask)
-        
-    elif fit_mode == "fit":
-        # Resize to fit inside circle (keeps aspect ratio, adds padding)
-        scale = min(output_size / img_width, output_size / img_height)
-        new_width = int(img_width * scale)
-        new_height = int(img_height * scale)
-        resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        x = (output_size - new_width) // 2
-        y = (output_size - new_height) // 2
-        base.paste(resized, (x, y), mask)
-        
-    elif fit_mode == "stretch":
-        # Stretch to fill (distorts aspect ratio)
-        resized = image.resize((output_size, output_size), Image.Resampling.LANCZOS)
-        base.paste(resized, (0, 0), mask)
-    
-    return base
+st.set_page_config(page_title="Perfect Circle Logo", layout="wide")
 
-def main():
-    st.title("🔄 Smart Circular Logo Resizer")
+st.title("🎯 Perfect Circular Logo Maker")
+st.markdown("Transform any logo into a perfect circle with proper scaling")
+
+# Upload
+uploaded_file = st.file_uploader("Choose a logo image", type=['png', 'jpg', 'jpeg', 'gif'])
+
+if uploaded_file:
+    original = Image.open(uploaded_file).convert("RGBA")
     
-    uploaded_file = st.file_uploader("Upload logo", type=['png', 'jpg', 'jpeg'])
+    col1, col2 = st.columns(2)
     
-    if uploaded_file:
-        image = Image.open(uploaded_file)
+    with col1:
+        st.subheader("Original Logo")
+        st.image(original, use_column_width=True)
         
-        col1, col2 = st.columns(2)
+        # Show original dimensions
+        w, h = original.size
+        st.caption(f"Original size: {w} × {h} pixels")
+    
+    with col2:
+        st.subheader("Customization")
         
-        with col1:
-            st.image(image, caption="Original", use_column_width=True)
+        # Size
+        output_size = st.slider("Output size (pixels):", 100, 1000, 500)
         
-        with col2:
-            # Options
-            size = st.slider("Output size:", 100, 1000, 500)
-            fit_mode = st.radio("Fit mode:", 
-                              ["fill", "fit", "stretch"],
-                              format_func=lambda x: {
-                                  "fill": "Fill Circle (crop edges)",
-                                  "fit": "Fit Inside (add padding)", 
-                                  "stretch": "Stretch (distort)"
-                              }[x])
-            
-            bg_color = st.color_picker("Background", "#FFFFFF")
-            
-            if st.button("Generate"):
-                # Convert hex to RGBA
-                bg_rgb = tuple(int(bg_color[i:i+2], 16) for i in (1, 3, 5))
-                bg_rgba = bg_rgb + (255,)
-                
-                # Create circular logo
-                result = create_circular_logo_smart(
-                    image, 
-                    output_size=size,
-                    fit_mode=fit_mode,
-                    bg_color=bg_rgba
+        # Fit options
+        fit_option = st.selectbox(
+            "How should the image fit?",
+            [
+                "fill_circle", 
+                "fit_inside", 
+                "crop_to_circle"
+            ],
+            format_func=lambda x: {
+                "fill_circle": "Fill Circle (crop edges if needed)",
+                "fit_inside": "Fit Inside Circle (add padding)",
+                "crop_to_circle": "Crop to Circle (exact circle from center)"
+            }[x]
+        )
+        
+        # Background
+        use_bg = st.checkbox("Add background color", value=True)
+        bg_color = "#FFFFFF"
+        if use_bg:
+            bg_color = st.color_picker("Choose background color", "#FFFFFF")
+        
+        # Border
+        add_border = st.checkbox("Add border", value=False)
+        border_color = "#000000"
+        border_width = 5
+        if add_border:
+            border_color = st.color_picker("Border color", "#000000")
+            border_width = st.slider("Border width", 1, 20, 5)
+        
+        # Generate button
+        if st.button("🔄 Create Circular Logo", type="primary"):
+            with st.spinner("Creating perfect circular logo..."):
+                # Create the circular logo
+                result = create_perfect_circular_logo(
+                    original,
+                    size=output_size,
+                    fit_mode=fit_option,
+                    bg_color=bg_color,
+                    border_color=border_color if add_border else None,
+                    border_width=border_width if add_border else 0
                 )
                 
                 # Show result
-                st.image(result, caption="Result", use_column_width=True)
+                st.subheader("Result")
+                st.image(result, use_column_width=True)
                 
-                # Download
+                # Create download
                 img_bytes = io.BytesIO()
-                result.save(img_bytes, format="PNG")
+                result.save(img_bytes, format="PNG", optimize=True)
                 
+                # Download button
                 st.download_button(
-                    "💾 Download",
+                    label="📥 Download PNG",
                     data=img_bytes.getvalue(),
-                    file_name=f"logo_circle_{fit_mode}_{size}x{size}.png",
-                    mime="image/png"
+                    file_name=f"perfect_circular_logo_{output_size}px.png",
+                    mime="image/png",
+                    use_container_width=True
                 )
+                
+                st.success(f"✅ Perfect circular logo created at {output_size}×{output_size} pixels!")
+
+def create_perfect_circular_logo(image, size=500, fit_mode="fill_circle", 
+                                bg_color="#FFFFFF", border_color=None, border_width=0):
+    """
+    Creates a perfect circular logo with proper image scaling
+    """
+    # Convert hex color to RGB/RGBA
+    def hex_to_rgba(hex_color, alpha=255):
+        hex_color = hex_color.lstrip('#')
+        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        return rgb + (alpha,)
+    
+    bg_rgba = hex_to_rgba(bg_color)
+    
+    # Create base image with background
+    base = Image.new('RGBA', (size, size), bg_rgba)
+    
+    # Create circular mask
+    mask = Image.new('L', (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse([(0, 0), (size, size)], fill=255)
+    
+    img_w, img_h = image.size
+    
+    if fit_mode == "fill_circle":
+        # Fill entire circle (crop to square, then resize)
+        min_dim = min(img_w, img_h)
+        left = (img_w - min_dim) // 2
+        top = (img_h - min_dim) // 2
+        cropped = image.crop((left, top, left + min_dim, top + min_dim))
+        
+        # Resize to output size
+        resized = cropped.resize((size, size), Image.Resampling.LANCZOS)
+        
+        # Apply circular mask
+        temp = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+        temp.paste(resized, (0, 0), mask)
+        base = Image.alpha_composite(base, temp)
+    
+    elif fit_mode == "fit_inside":
+        # Fit inside circle (resize maintaining aspect ratio)
+        scale = min(size / img_w, size / img_h) * 0.9  # 90% to add padding
+        new_w = int(img_w * scale)
+        new_h = int(img_h * scale)
+        
+        resized = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        
+        # Center the image
+        x = (size - new_w) // 2
+        y = (size - new_h) // 2
+        
+        temp = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+        temp.paste(resized, (x, y), mask)
+        base = Image.alpha_composite(base, temp)
+    
+    elif fit_mode == "crop_to_circle":
+        # Crop a circular area from center of original
+        # Create mask at original size
+        original_mask = Image.new('L', (img_w, img_h), 0)
+        original_draw = ImageDraw.Draw(original_mask)
+        
+        # Create circle in center of original
+        circle_diameter = min(img_w, img_h)
+        left = (img_w - circle_diameter) // 2
+        top = (img_h - circle_diameter) // 2
+        original_draw.ellipse([(left, top), (left + circle_diameter, top + circle_diameter)], fill=255)
+        
+        # Apply mask to original
+        temp = Image.new('RGBA', (img_w, img_h), (0, 0, 0, 0))
+        temp.paste(image, (0, 0), original_mask)
+        
+        # Crop to the circle bounds
+        cropped = temp.crop((left, top, left + circle_diameter, top + circle_diameter))
+        
+        # Resize to output size
+        resized = cropped.resize((size, size), Image.Resampling.LANCZOS)
+        base.paste(resized, (0, 0), resized)
+    
+    # Add border if requested
+    if border_color and border_width > 0:
+        border_rgba = hex_to_rgba(border_color)
+        border_img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+        border_draw = ImageDraw.Draw(border_img)
+        
+        # Draw border
+        border_draw.ellipse(
+            [(border_width//2, border_width//2), 
+             (size - border_width//2, size - border_width//2)],
+            outline=border_rgba,
+            width=border_width
+        )
+        
+        base = Image.alpha_composite(base, border_img)
+    
+    return base
+
+# Add info section
+st.markdown("---")
+st.markdown("### 📊 Fit Mode Explanation:")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.markdown("""
+    **Fill Circle** 
+    - Crops image to square
+    - Resizes to fill circle
+    - No empty space
+    """)
+    
+with col2:
+    st.markdown("""
+    **Fit Inside**
+    - Keeps full image
+    - Adds padding if needed
+    - Maintains aspect ratio
+    """)
+    
+with col3:
+    st.markdown("""
+    **Crop to Circle**
+    - Takes circular area from center
+    - Preserves original quality
+    - No distortion
+    """)
+
+st.markdown("""
+<div style='text-align: center; margin-top: 30px; color: #666;'>
+    <p>Your downloaded logo will now have the image properly sized inside the circle! ✅</p>
+</div>
+""", unsafe_allow_html=True)
